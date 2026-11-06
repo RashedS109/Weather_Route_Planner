@@ -66,4 +66,33 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.close();
         return cityList;
     }
+    // Insert a road (Edge)
+    public void insertRoad(int fromId, int toId, int distance) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        ContentValues values = new ContentValues();
+        values.put("from_id", fromId);
+        values.put("to_id", toId);
+        values.put("distance", distance);
+        db.insert("roads", null, values);
+        db.close();
+    }
+
+    // Get all roads
+    public List<Road> getAllRoads() {
+        List<Road> roadList = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT * FROM roads", null);
+
+        if (cursor.moveToFirst()) {
+            do {
+                roadList.add(new Road(
+                        cursor.getInt(0),
+                        cursor.getInt(1),
+                        cursor.getInt(2)
+                ));
+            } while (cursor.moveToNext());
+        }
+        cursor.close();
+        return roadList;
+    }
 }

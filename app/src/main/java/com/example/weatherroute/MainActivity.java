@@ -7,11 +7,21 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import com.example.weatherroute.databinding.ActivityMainBinding;
 import java.util.ArrayList;
 import java.util.List;
+import android.view.View;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import android.widget.Toast;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
     private DatabaseHelper db;
+    private FirebaseFirestore firestoreDB;
+    private FirebaseAuth mAuth;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -21,11 +31,28 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize Database
         db = new DatabaseHelper(this);
+        firestoreDB = FirebaseFirestore.getInstance();
+        mAuth = FirebaseAuth.getInstance();
+
+
+        // 1. Populate cities if empty
         if (db.getAllCities().isEmpty()) {
             db.insertCity(1, "Dhaka", 23.8103, 90.4125);
             db.insertCity(2, "Khulna", 22.8456, 89.5403);
             db.insertCity(3, "Rajshahi", 24.3636, 88.6241);
             db.insertCity(4, "Chittagong", 22.3569, 91.7832);
+        }
+
+        // 2. Populate roads if empty (This fixes the bug!)
+        if (db.getAllRoads().isEmpty()) {
+            db.insertRoad(1, 2, 200); // Dhaka to Khulna
+            db.insertRoad(2, 1, 200);
+            db.insertRoad(1, 3, 250); // Dhaka to Rajshahi
+            db.insertRoad(3, 1, 250);
+            db.insertRoad(1, 4, 250); // Dhaka to Chittagong
+            db.insertRoad(4, 1, 250);
+            db.insertRoad(2, 3, 280); // Khulna to Rajshahi
+            db.insertRoad(3, 2, 280);
         }
 
         // Setup Spinners with Data from SQLite
@@ -38,14 +65,65 @@ public class MainActivity extends AppCompatActivity {
         binding.recyclerViewRoute.setLayoutManager(new LinearLayoutManager(this));
 
         // Setup Button Click Listener (We will put actual Dijkstra logic here later)
-        binding.btnCalculateRoute.setOnClickListener(v -> {
-            // Temporary dummy data to test the UI
-            List<RouteStep> dummySteps = new ArrayList<>();
-            dummySteps.add(new RouteStep("Dhaka → Khulna", "Distance: 200 km", "Weather: Clear"));
-            dummySteps.add(new RouteStep("Khulna → Chittagong", "Distance: 350 km", "Weather: Heavy Rain"));
+        // Create an Executor for background thread management (Week 4 Requirement)
+        ExecutorService executor = Executors.newSingleThreadExecutor();
 
-            RouteAdapter routeAdapter = new RouteAdapter(dummySteps);
-            binding.recyclerViewRoute.setAdapter(routeAdapter);
+        binding.btnCalculateRoute.setOnClickListener(v -> {
+            // 1. Show loading spinner on the UI thread
+            binding.progressBar.setVisibility(View.VISIBLE);
+            binding.btnCalculateRoute.setEnabled(false);
+
+            // 2. Get selected cities
+            City origin = (City) binding.spinnerOrigin.getSelectedItem();
+            City destination = (City) binding.spinnerDestination.getSelectedItem();
+
+            // 3. Execute network operations in a background thread
+            // 3. Execute network and Dijkstra operations in a background thread
+            executor.execute(() -> {
+                // Fetch all data from local SQLite database
+                List<City> allCities = db.getAllCities();
+                List<Road> allRoads = db.getAllRoads();
+
+                // Run Dijkstra's Algorithm
+                List<RouteStep> optimizedRoute = RouteOptimizer.calculateSafestRoute(origin, destination, allCities, allRoads);
+
+                // 4. Post the results back to the Main UI Thread
+                // 4. Post the results back to the Main UI Thread
+                runOnUiThread(() -> {
+                    binding.progressBar.setVisibility(View.GONE);
+                    binding.btnCalculateRoute.setEnabled(true);
+
+                    RouteAdapter routeAdapter = new RouteAdapter(optimizedRoute);
+                    binding.recyclerViewRoute.setAdapter(routeAdapter);
+
+                    // NEW: Save the search to Cloud Firestore
+                    if (optimizedRoute.size() > 0 && !optimizedRoute.get(0).getSegment().equals("No safe route found")) {
+                        saveRouteToCloud(origin.getName(), destination.getName(), optimizedRoute.size());
+                    }
+                });
+            });
         });
+    }
+    private void saveRouteToCloud(String origin, String dest, int stepCount) {
+        if (mAuth.getCurrentUser() == null) return;
+
+        String userId = mAuth.getCurrentUser().getUid();
+
+        // Create a data package (HashMap) to send to Firestore
+        Map<String, Object> routeData = new HashMap<>();
+        routeData.put("origin", origin);
+        routeData.put("destination", dest);
+        routeData.put("totalSteps", stepCount);
+        routeData.put("timestamp", System.currentTimeMillis());
+
+        // Push to Cloud Firestore under the user's unique ID
+        firestoreDB.collection("users").document(userId).collection("searchHistory")
+                .add(routeData)
+                .addOnSuccessListener(documentReference -> {
+                    Toast.makeText(MainActivity.this, "Route saved to cloud!", Toast.LENGTH_SHORT).show();
+                })
+                .addOnFailureListener(e -> {
+                    Toast.makeText(MainActivity.this, "Cloud save failed.", Toast.LENGTH_SHORT).show();
+                });
     }
 }
