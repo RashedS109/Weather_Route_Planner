@@ -15,6 +15,11 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.FirebaseFirestore;
 import java.util.HashMap;
 import java.util.Map;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -22,6 +27,7 @@ public class MainActivity extends AppCompatActivity {
     private DatabaseHelper db;
     private FirebaseFirestore firestoreDB;
     private FirebaseAuth mAuth;
+    private DatabaseReference realtimeDb;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,6 +39,25 @@ public class MainActivity extends AppCompatActivity {
         db = new DatabaseHelper(this);
         firestoreDB = FirebaseFirestore.getInstance();
         mAuth = FirebaseAuth.getInstance();
+        realtimeDb = FirebaseDatabase.getInstance("https://weather-route-planner-75a41-default-rtdb.asia-southeast1.firebasedatabase.app/").getReference("global_stats");
+
+        // 1. Listen for LIVE updates from the cloud
+        realtimeDb.child("total_routes").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                Long count = snapshot.getValue(Long.class);
+                if (count != null) {
+                    binding.tvGlobalCounter.setText("Global Routes Calculated: " + count);
+                } else {
+                    binding.tvGlobalCounter.setText("Global Routes Calculated: 0");
+                }
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                // Handle error if needed
+            }
+        });
 
 
         // 1. Populate cities if empty
@@ -125,5 +150,13 @@ public class MainActivity extends AppCompatActivity {
                 .addOnFailureListener(e -> {
                     Toast.makeText(MainActivity.this, "Cloud save failed.", Toast.LENGTH_SHORT).show();
                 });
+        // Increment the global Realtime Database counter
+        realtimeDb.child("total_routes").get().addOnSuccessListener(snapshot -> {
+            long currentCount = 0;
+            if (snapshot.exists() && snapshot.getValue() != null) {
+                currentCount = (long) snapshot.getValue();
+            }
+            realtimeDb.child("total_routes").setValue(currentCount + 1);
+        });
     }
 }
