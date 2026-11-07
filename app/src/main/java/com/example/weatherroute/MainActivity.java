@@ -1,8 +1,16 @@
 package com.example.weatherroute;
 
+import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
+import android.provider.ContactsContract;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
@@ -43,27 +51,36 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseAuth mAuth;
     private DatabaseReference realtimeDb;
 
+    // Android Core Component: Broadcast Receiver
+    private AirplaneModeReceiver airplaneModeReceiver = new AirplaneModeReceiver();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         // MUST load osmdroid config before the map is created
         Configuration.getInstance().load(getApplicationContext(), PreferenceManager.getDefaultSharedPreferences(getApplicationContext()));
-        // Tell OpenStreetMap who we are so they don't block our access
+
+        // Give the map a unique fake ID so OpenStreetMap doesn't block "com.example" apps
         Configuration.getInstance().setUserAgentValue("AdvancedProgrammingLab_WeatherApp_v1.0");
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+        // Ask for Notification Permission on Android 13+ for the Foreground Service
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 101);
+            }
+        }
 
         // Initialize Firebase
         mAuth = FirebaseAuth.getInstance();
         firestoreDB = FirebaseFirestore.getInstance();
 
-        // NOTE: If your counter gets stuck on "Loading...", paste your copied Realtime DB URL inside getInstance() below:
-        // e.g., FirebaseDatabase.getInstance("https://your-url.firebasedatabase.app/").getReference("global_stats")
+        // PASTE YOUR REALTIME DATABASE URL HERE:
         realtimeDb = FirebaseDatabase.getInstance("https://weather-route-planner-75a41-default-rtdb.asia-southeast1.firebasedatabase.app/").getReference("global_stats");
 
-        // Setup the Map
+        // Setup the Map using the unblocked OpenTopo map server
         map = binding.mapView;
         map.setTileSource(TileSourceFactory.OpenTopo);
         map.setMultiTouchControls(true);
@@ -72,9 +89,11 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize Database with Global Cities
         db = new DatabaseHelper(this);
-        // Force-delete the old Bangladesh data so the new cities can load
+
+        // Force-delete the old Bangladesh data so the new global cities can load
         db.getWritableDatabase().execSQL("DELETE FROM cities");
         db.getWritableDatabase().execSQL("DELETE FROM roads");
+
         if (db.getAllCities().isEmpty()) {
             db.insertCity(1, "London", 51.5072, -0.1276);
             db.insertCity(2, "Paris", 48.8566, 2.3522);
@@ -117,8 +136,15 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onCancelled(DatabaseError error) {
-                // Handle error if needed
+            public void onCancelled(DatabaseError error) {}
+        });
+
+        // Android Core Component: Content Provider Logic (Read Contacts)
+        binding.btnShareContact.setOnClickListener(v -> {
+            if (checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+                accessContactsProvider();
+            } else {
+                requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS}, 100);
             }
         });
 
@@ -181,10 +207,28 @@ public class MainActivity extends AppCompatActivity {
 
                         // Save to Firebase
                         saveRouteToCloud(origin.getName(), destination.getName(), optimizedRoute.size());
+
+                        // Android Core Component: Start Foreground Service (Notification Tray)
+                        startService(new Intent(MainActivity.this, NavigationService.class));
                     }
                 });
             });
         });
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // Register Broadcast Receiver
+        IntentFilter filter = new IntentFilter(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        registerReceiver(airplaneModeReceiver, filter);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Prevent memory leaks
+        unregisterReceiver(airplaneModeReceiver);
     }
 
     private void saveRouteToCloud(String origin, String dest, int stepCount) {
@@ -217,5 +261,25 @@ public class MainActivity extends AppCompatActivity {
             }
             realtimeDb.child("total_routes").setValue(currentCount + 1);
         });
+    }
+
+    @SuppressLint("Range")
+    private void accessContactsProvider() {
+        // Query the Android Contacts Content Provider AND sort alphabetically by name (A to Z)
+        Cursor cursor = getContentResolver().query(
+                ContactsContract.Contacts.CONTENT_URI,
+                null,
+                null,
+                null,
+                ContactsContract.Contacts.DISPLAY_NAME + " ASC" // <-- This forces alphabetical order!
+        );
+
+        if (cursor != null && cursor.moveToFirst()) {
+            String contactName = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
+            Toast.makeText(this, "Route shared with: " + contactName, Toast.LENGTH_LONG).show();
+            cursor.close();
+        } else {
+            Toast.makeText(this, "No contacts found on device.", Toast.LENGTH_SHORT).show();
+        }
     }
 }
