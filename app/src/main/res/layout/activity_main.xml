@@ -47,6 +47,13 @@
         android:layout_marginBottom="16dp"
         android:background="@android:drawable/btn_dropdown" />
 
+    <!-- Free OpenStreetMap View -->
+    <org.osmdroid.views.MapView
+        android:id="@+id/mapView"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginBottom="16dp" />
+
     <!-- Action Button -->
     <Button
         android:id="@+id/btnCalculateRoute"
