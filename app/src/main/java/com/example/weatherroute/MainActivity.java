@@ -59,72 +59,77 @@ public class MainActivity extends AppCompatActivity {
     private AirplaneModeReceiver airplaneModeReceiver = new AirplaneModeReceiver();
     private FusedLocationProviderClient fusedLocationClient;
 
+    // Dynamic Graph Tracker for Bellman-Ford (City ID -> Penalty Multiplier)
+    private Map<Integer, Double> activeStorms = new HashMap<>();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // MUST load osmdroid config before the map is created
         Configuration.getInstance().load(getApplicationContext(), PreferenceManager.getDefaultSharedPreferences(getApplicationContext()));
-
-        // Give the map a unique fake ID so OpenStreetMap doesn't block "com.example" apps
         Configuration.getInstance().setUserAgentValue("AdvancedProgrammingLab_WeatherApp_v1.0");
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // Ask for Notification Permission on Android 13+ for the Foreground Service
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 101);
             }
         }
 
-        // Initialize Firebase
         mAuth = FirebaseAuth.getInstance();
         firestoreDB = FirebaseFirestore.getInstance();
 
         // PASTE YOUR REALTIME DATABASE URL HERE:
         realtimeDb = FirebaseDatabase.getInstance("https://weather-route-planner-75a41-default-rtdb.asia-southeast1.firebasedatabase.app/").getReference("global_stats");
 
-        // Initialize GPS Client
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
-        // Setup the Map using the unblocked OpenTopo map server
         map = binding.mapView;
         map.setTileSource(TileSourceFactory.OpenTopo);
         map.setMultiTouchControls(true);
-        map.getController().setZoom(4.0);
-        map.getController().setCenter(new GeoPoint(48.8566, 2.3522)); // Center on Europe
+        map.getController().setZoom(7.0);
+        map.getController().setCenter(new GeoPoint(23.8103, 90.4125)); // Center on Dhaka
 
-        // Initialize Database with Global Cities
         db = new DatabaseHelper(this);
-
-        // Force-delete the old Bangladesh data so the new global cities can load
         db.getWritableDatabase().execSQL("DELETE FROM cities");
         db.getWritableDatabase().execSQL("DELETE FROM roads");
 
         if (db.getAllCities().isEmpty()) {
-            db.insertCity(1, "London", 51.5072, -0.1276);
-            db.insertCity(2, "Paris", 48.8566, 2.3522);
-            db.insertCity(3, "Oslo", 59.9139, 10.7522);
-            db.insertCity(4, "Rome", 41.9028, 12.4964);
-            db.insertCity(5, "Cairo", 30.0444, 31.2357);
+            db.insertCity(1, "Khulna", 22.8456, 89.5403);
+            db.insertCity(2, "Dhaka", 23.8103, 90.4125);
+            db.insertCity(3, "Rajshahi", 24.3745, 88.6042);
+            db.insertCity(4, "Chittagong", 22.3569, 91.7832);
+            db.insertCity(5, "Sylhet", 24.8949, 91.8687);
         }
 
         if (db.getAllRoads().isEmpty()) {
-            db.insertRoad(1, 2, 470);
-            db.insertRoad(2, 1, 470);
-            db.insertRoad(1, 3, 1800);
-            db.insertRoad(3, 1, 1800);
-            db.insertRoad(2, 3, 1600);
-            db.insertRoad(3, 2, 1600);
-            db.insertRoad(2, 4, 1400);
-            db.insertRoad(4, 2, 1400);
-            db.insertRoad(4, 5, 2100);
-            db.insertRoad(5, 4, 2100);
+            // Main Highways through Dhaka
+            db.insertRoad(1, 2, 270);
+            db.insertRoad(2, 1, 270);
+
+            db.insertRoad(3, 2, 250);
+            db.insertRoad(2, 3, 250);
+
+            db.insertRoad(1, 3, 280);
+            db.insertRoad(3, 1, 280);
+
+            db.insertRoad(2, 4, 250);
+            db.insertRoad(4, 2, 250);
+
+            db.insertRoad(2, 5, 240);
+            db.insertRoad(5, 2, 240);
+
+            // Eastern Highway
+            db.insertRoad(4, 5, 340);
+            db.insertRoad(5, 4, 340);
+
+            // Coastal/Ferry Bypass (avoids Dhaka entirely)
+            db.insertRoad(1, 4, 350);
+            db.insertRoad(4, 1, 350);
         }
 
-        // Setup UI Adapters
         binding.recyclerViewRoute.setLayoutManager(new LinearLayoutManager(this));
 
         List<City> cities = db.getAllCities();
@@ -132,7 +137,6 @@ public class MainActivity extends AppCompatActivity {
         binding.spinnerOrigin.setAdapter(adapter);
         binding.spinnerDestination.setAdapter(adapter);
 
-        // Listen for LIVE updates from the cloud counter
         realtimeDb.child("total_routes").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(DataSnapshot snapshot) {
@@ -143,12 +147,10 @@ public class MainActivity extends AppCompatActivity {
                     binding.tvGlobalCounter.setText("Global Routes Calculated: 0");
                 }
             }
-
             @Override
             public void onCancelled(DatabaseError error) {}
         });
 
-        // GPS Snapping Logic
         binding.btnDetectLocation.setOnClickListener(v -> {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
                 getCurrentLocationAndSnapToCity();
@@ -157,7 +159,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Android Core Component: Content Provider Logic (Read Contacts)
         binding.btnShareContact.setOnClickListener(v -> {
             if (checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
                 accessContactsProvider();
@@ -166,7 +167,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Background Executor for Multithreading
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         binding.btnCalculateRoute.setOnClickListener(v -> {
@@ -176,13 +176,42 @@ public class MainActivity extends AppCompatActivity {
             City origin = (City) binding.spinnerOrigin.getSelectedItem();
             City destination = (City) binding.spinnerDestination.getSelectedItem();
 
+            if (origin.getId() == destination.getId()) {
+                Toast.makeText(MainActivity.this, "Origin and Destination cannot be the same!", Toast.LENGTH_SHORT).show();
+                binding.progressBar.setVisibility(View.GONE);
+                binding.btnCalculateRoute.setEnabled(true);
+                return;
+            }
+
+            RouteOptimizer.RoutingMode selectedMode = RouteOptimizer.RoutingMode.BALANCED;
+            int selectedId = binding.radioGroupMode.getCheckedRadioButtonId();
+            if (selectedId == R.id.radioSafest) {
+                selectedMode = RouteOptimizer.RoutingMode.SAFEST_FIRST;
+            } else if (selectedId == R.id.radioShortest) {
+                selectedMode = RouteOptimizer.RoutingMode.SHORTEST_FIRST;
+            }
+            final RouteOptimizer.RoutingMode finalMode = selectedMode;
+
             executor.execute(() -> {
-                // Fetch all data from local SQLite database
                 List<City> allCities = db.getAllCities();
                 List<Road> allRoads = db.getAllRoads();
 
-                // Run Dijkstra's Algorithm with Live Weather API penalties
-                List<RouteStep> optimizedRoute = RouteOptimizer.calculateSafestRoute(origin, destination, allCities, allRoads);
+                runOnUiThread(() -> map.getOverlays().clear());
+
+                List<RouteStep> optimizedRoute = RouteOptimizer.calculateOptimalRoute(origin, destination, allCities, allRoads, finalMode, (fromCity, toCity) -> {
+                    runOnUiThread(() -> {
+                        GeoPoint scanStart = new GeoPoint(fromCity.getLat(), fromCity.getLon());
+                        GeoPoint scanEnd = new GeoPoint(toCity.getLat(), toCity.getLon());
+
+                        Polyline evalLine = new Polyline();
+                        evalLine.addPoint(scanStart);
+                        evalLine.addPoint(scanEnd);
+                        evalLine.setColor(Color.parseColor("#99FFEB3B"));
+                        evalLine.setWidth(6f);
+                        map.getOverlays().add(evalLine);
+                        map.invalidate();
+                    });
+                });
 
                 runOnUiThread(() -> {
                     binding.progressBar.setVisibility(View.GONE);
@@ -191,43 +220,106 @@ public class MainActivity extends AppCompatActivity {
                     RouteAdapter routeAdapter = new RouteAdapter(optimizedRoute);
                     binding.recyclerViewRoute.setAdapter(routeAdapter);
 
-                    // Draw Route on OpenStreetMap
                     if (optimizedRoute.size() > 0 && !optimizedRoute.get(0).getSegment().equals("No safe route found")) {
-                        map.getOverlays().clear(); // Clear previous search
-
                         GeoPoint startPoint = new GeoPoint(origin.getLat(), origin.getLon());
                         GeoPoint endPoint = new GeoPoint(destination.getLat(), destination.getLon());
 
-                        // Add Start Marker
                         Marker startMarker = new Marker(map);
                         startMarker.setPosition(startPoint);
                         startMarker.setTitle("Start: " + origin.getName());
                         map.getOverlays().add(startMarker);
 
-                        // Add End Marker
                         Marker endMarker = new Marker(map);
                         endMarker.setPosition(endPoint);
                         endMarker.setTitle("End: " + destination.getName());
                         map.getOverlays().add(endMarker);
 
-                        // Draw a line between the two cities
-                        Polyline line = new Polyline();
-                        line.addPoint(startPoint);
-                        line.addPoint(endPoint);
-                        line.setColor(Color.BLUE);
-                        line.setWidth(8f);
-                        map.getOverlays().add(line);
+                        Polyline finalLine = new Polyline();
+                        finalLine.addPoint(startPoint);
+                        for (RouteStep step : optimizedRoute) {
+                            String[] cityNames = step.getSegment().split(" -> ");
+                            if (cityNames.length == 2) {
+                                City stepCity = getCityByName(allCities, cityNames[1]);
+                                if (stepCity != null) {
+                                    finalLine.addPoint(new GeoPoint(stepCity.getLat(), stepCity.getLon()));
+                                }
+                            }
+                        }
 
-                        // Refresh map and zoom
+                        finalLine.setColor(Color.BLUE);
+                        finalLine.setWidth(10f);
+                        map.getOverlays().add(finalLine);
+
                         map.invalidate();
                         map.getController().animateTo(startPoint);
-                        map.getController().setZoom(5.0);
+                        map.getController().setZoom(7.0);
 
-                        // Save to Firebase
                         saveRouteToCloud(origin.getName(), destination.getName(), optimizedRoute.size());
-
-                        // Android Core Component: Start Foreground Service (Notification Tray)
                         startService(new Intent(MainActivity.this, NavigationService.class));
+                    } else {
+                        Toast.makeText(MainActivity.this, "No route found between these cities.", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            });
+        });
+
+        binding.btnSimulateStorm.setOnClickListener(v -> {
+            City origin = (City) binding.spinnerOrigin.getSelectedItem();
+            City destination = (City) binding.spinnerDestination.getSelectedItem();
+
+            if (origin.getId() == destination.getId()) return;
+
+            binding.progressBar.setVisibility(View.VISIBLE);
+            Toast.makeText(this, "⚠️ STORM DETECTED IN DHAKA! Recalculating with Bellman-Ford...", Toast.LENGTH_LONG).show();
+
+            executor.execute(() -> {
+                List<City> allCities = db.getAllCities();
+                List<Road> allRoads = db.getAllRoads();
+
+                activeStorms.clear();
+                activeStorms.put(2, 9999.0); // 2 = Dhaka
+
+                List<RouteStep> stormRoute = RouteOptimizer.calculateRouteBellmanFord(origin, destination, allCities, allRoads, activeStorms);
+
+                runOnUiThread(() -> {
+                    binding.progressBar.setVisibility(View.GONE);
+
+                    RouteAdapter routeAdapter = new RouteAdapter(stormRoute);
+                    binding.recyclerViewRoute.setAdapter(routeAdapter);
+
+                    if (stormRoute.size() > 0 && !stormRoute.get(0).getSegment().equals("No safe route found")) {
+                        map.getOverlays().clear();
+
+                        GeoPoint startPoint = new GeoPoint(origin.getLat(), origin.getLon());
+                        GeoPoint endPoint = new GeoPoint(destination.getLat(), destination.getLon());
+
+                        Marker startMarker = new Marker(map);
+                        startMarker.setPosition(startPoint);
+                        startMarker.setTitle("Start: " + origin.getName());
+                        map.getOverlays().add(startMarker);
+
+                        Marker endMarker = new Marker(map);
+                        endMarker.setPosition(endPoint);
+                        endMarker.setTitle("End: " + destination.getName());
+                        map.getOverlays().add(endMarker);
+
+                        Polyline emergencyLine = new Polyline();
+                        emergencyLine.addPoint(startPoint);
+                        for (RouteStep step : stormRoute) {
+                            String[] cityNames = step.getSegment().split(" -> ");
+                            if (cityNames.length == 2) {
+                                City stepCity = getCityByName(allCities, cityNames[1]);
+                                if (stepCity != null) {
+                                    emergencyLine.addPoint(new GeoPoint(stepCity.getLat(), stepCity.getLon()));
+                                }
+                            }
+                        }
+
+                        emergencyLine.setColor(Color.RED);
+                        emergencyLine.setWidth(10f);
+                        map.getOverlays().add(emergencyLine);
+
+                        map.invalidate();
                     }
                 });
             });
@@ -237,7 +329,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        // Register Broadcast Receiver
         IntentFilter filter = new IntentFilter(Intent.ACTION_AIRPLANE_MODE_CHANGED);
         registerReceiver(airplaneModeReceiver, filter);
     }
@@ -245,23 +336,19 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
-        // Prevent memory leaks
         unregisterReceiver(airplaneModeReceiver);
     }
 
     private void saveRouteToCloud(String origin, String dest, int stepCount) {
         if (mAuth.getCurrentUser() == null) return;
-
         String userId = mAuth.getCurrentUser().getUid();
 
-        // Create a data package (HashMap) to send to Firestore
         Map<String, Object> routeData = new HashMap<>();
         routeData.put("origin", origin);
         routeData.put("destination", dest);
         routeData.put("totalSteps", stepCount);
         routeData.put("timestamp", System.currentTimeMillis());
 
-        // Push to Cloud Firestore under the user's unique ID
         firestoreDB.collection("users").document(userId).collection("searchHistory")
                 .add(routeData)
                 .addOnSuccessListener(documentReference -> {
@@ -271,7 +358,6 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(MainActivity.this, "Cloud save failed.", Toast.LENGTH_SHORT).show();
                 });
 
-        // Increment the global Realtime Database counter
         realtimeDb.child("total_routes").get().addOnSuccessListener(snapshot -> {
             long currentCount = 0;
             if (snapshot.exists() && snapshot.getValue() != null) {
@@ -283,7 +369,6 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("Range")
     private void accessContactsProvider() {
-        // Query the Android Contacts Content Provider AND sort alphabetically by name (A to Z)
         Cursor cursor = getContentResolver().query(
                 ContactsContract.Contacts.CONTENT_URI,
                 null,
@@ -309,7 +394,6 @@ public class MainActivity extends AppCompatActivity {
                 double userLat = location.getLatitude();
                 double userLon = location.getLongitude();
 
-                // Find the nearest city in our SQLite database
                 List<City> cities = db.getAllCities();
                 City nearestCity = null;
                 double minDistance = Double.MAX_VALUE;
@@ -323,7 +407,6 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 if (nearestCity != null) {
-                    // Automatically select the nearest city in the Origin Spinner
                     ArrayAdapter<City> adapter = (ArrayAdapter<City>) binding.spinnerOrigin.getAdapter();
                     int spinnerPosition = adapter.getPosition(nearestCity);
                     binding.spinnerOrigin.setSelection(spinnerPosition);
@@ -331,12 +414,11 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, "Snapped to nearest city: " + nearestCity.getName(), Toast.LENGTH_SHORT).show();
                 }
             } else {
-                Toast.makeText(this, "Unable to detect GPS. Ensure location is turned on.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Unable to detect GPS. Ensure location is turned on.", Toast.LENGTH_LONG).show();
             }
         });
     }
 
-    // Mathematical implementation of the Haversine formula for spherical distance
     private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
@@ -344,6 +426,13 @@ public class MainActivity extends AppCompatActivity {
                 Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
                         Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return 6371.0 * c; // Earth radius in kilometers
+        return 6371.0 * c;
+    }
+
+    private City getCityByName(List<City> cities, String name) {
+        for (City c : cities) {
+            if (c.getName().equals(name)) return c;
+        }
+        return null;
     }
 }

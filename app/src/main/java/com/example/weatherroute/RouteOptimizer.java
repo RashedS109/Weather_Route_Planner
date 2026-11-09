@@ -9,114 +9,213 @@ import java.util.PriorityQueue;
 
 public class RouteOptimizer {
 
-    // Helper class for PriorityQueue
-    private static class Node implements Comparable<Node> {
-        int cityId;
-        int distance;
+    public enum RoutingMode {
+        BALANCED,      // Combines weather and distance into one score
+        SAFEST_FIRST,  // Primary: Weather, Secondary: Distance
+        SHORTEST_FIRST // Primary: Distance, Secondary: Weather
+    }
 
-        Node(int cityId, int distance) {
-            this.cityId = cityId;
-            this.distance = distance;
+    public interface AlgorithmStepListener {
+        void onEdgeEvaluated(City fromCity, City toCity);
+    }
+
+    // Advanced Data Structure: Multi-Objective Cost Tuple
+    static class LexicographicCost implements Comparable<LexicographicCost> {
+        double primary;
+        double secondary;
+
+        public LexicographicCost(double primary, double secondary) {
+            this.primary = primary;
+            this.secondary = secondary;
+        }
+
+        public LexicographicCost add(double edgePrimary, double edgeSecondary) {
+            return new LexicographicCost(this.primary + edgePrimary, this.secondary + edgeSecondary);
+        }
+
+        @Override
+        public int compareTo(LexicographicCost other) {
+            // Strict Hierarchy: Only look at secondary if primary costs are identical
+            if (Math.abs(this.primary - other.primary) > 0.001) {
+                return Double.compare(this.primary, other.primary);
+            }
+            return Double.compare(this.secondary, other.secondary);
+        }
+    }
+
+    static class Node implements Comparable<Node> {
+        City city;
+        LexicographicCost cost;
+
+        public Node(City city, LexicographicCost cost) {
+            this.city = city;
+            this.cost = cost;
         }
 
         @Override
         public int compareTo(Node other) {
-            return Integer.compare(this.distance, other.distance);
+            return this.cost.compareTo(other.cost);
         }
     }
 
-    public static List<RouteStep> calculateSafestRoute(City origin, City destination, List<City> allCities, List<Road> allRoads) {
-        Map<Integer, Integer> distances = new HashMap<>();
-        Map<Integer, Integer> previousNodes = new HashMap<>();
-        Map<Integer, City> cityMap = new HashMap<>();
-        PriorityQueue<Node> queue = new PriorityQueue<>();
+    public static List<RouteStep> calculateOptimalRoute(City origin, City destination, List<City> allCities, List<Road> allRoads, RoutingMode mode, AlgorithmStepListener listener) {        Map<Integer, List<Road>> adjList = new HashMap<>();
+        for (City c : allCities) adjList.put(c.getId(), new ArrayList<>());
+        for (Road r : allRoads) adjList.get(r.getFromCityId()).add(r);
 
-        // Initialize maps
-        for (City city : allCities) {
-            distances.put(city.getId(), Integer.MAX_VALUE);
-            cityMap.put(city.getId(), city);
+        Map<Integer, LexicographicCost> distances = new HashMap<>();
+        Map<Integer, City> predecessors = new HashMap<>();
+        Map<Integer, Double> weatherPenalties = new HashMap<>();
+
+        PriorityQueue<Node> pq = new PriorityQueue<>();
+
+        // Initialize distances to infinity
+        for (City c : allCities) {
+            distances.put(c.getId(), new LexicographicCost(Double.MAX_VALUE, Double.MAX_VALUE));
         }
 
-        distances.put(origin.getId(), 0);
-        queue.add(new Node(origin.getId(), 0));
+        distances.put(origin.getId(), new LexicographicCost(0, 0));
+        pq.add(new Node(origin, new LexicographicCost(0, 0)));
 
-        while (!queue.isEmpty()) {
-            Node current = queue.poll();
-            int currentId = current.cityId;
+        while (!pq.isEmpty()) {
+            Node current = pq.poll();
+            City u = current.city;
 
-            if (currentId == destination.getId()) break; // Reached destination
-            if (current.distance > distances.get(currentId)) continue; // Obsolete node
+            if (u.getId() == destination.getId()) break; // Target reached
 
-            // Check all neighbors
-            for (Road road : allRoads) {
-                if (road.getFromCityId() == currentId) {
-                    int neighborId = road.getToCityId();
-                    City neighborCity = cityMap.get(neighborId);
-
-                    // --- WEATHER ADAPTIVE LOGIC ---
-                    // Fetch live weather for the neighbor city
-                    String weather = WeatherService.getLiveWeather(neighborCity.getLat(), neighborCity.getLon());
-
-                    // Apply penalty multiplier if bad weather (Rain/Snow = 1.5x longer travel time)
-                    int weatherPenalty = road.getDistance();
-                    if (weather.toLowerCase().contains("rain") || weather.toLowerCase().contains("snow")) {
-                        weatherPenalty = (int) (road.getDistance() * 1.5);
+            for (Road edge : adjList.get(u.getId())) {
+                City v = getCityById(allCities, edge.getToCityId());
+                if (listener != null) {
+                    listener.onEdgeEvaluated(u, v);
+                    try {
+                        Thread.sleep(400); // Pause for 400 milliseconds so the human eye can watch it "think"
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
                     }
+                }
+                // Fetch simulated or live weather penalty
+                double weatherPenalty = fetchWeatherPenalty(v);
+                weatherPenalties.put(v.getId(), weatherPenalty);
 
-                    int newDist = distances.get(currentId) + weatherPenalty;
+                double edgePrimary = 0;
+                double edgeSecondary = 0;
 
-                    if (newDist < distances.get(neighborId)) {
-                        distances.put(neighborId, newDist);
-                        previousNodes.put(neighborId, currentId);
-                        queue.add(new Node(neighborId, newDist));
-                    }
+                // Apply Multi-Objective Weights based on User Selection
+                switch (mode) {
+                    case SAFEST_FIRST:
+                        edgePrimary = weatherPenalty;       // Objective 1
+                        edgeSecondary = edge.getDistance(); // Objective 2
+                        break;
+                    case SHORTEST_FIRST:
+                        edgePrimary = edge.getDistance();   // Objective 1
+                        edgeSecondary = weatherPenalty;     // Objective 2
+                        break;
+                    case BALANCED:
+                        edgePrimary = edge.getDistance() + (weatherPenalty * 10); // Standard combined formula
+                        edgeSecondary = 0;
+                        break;
+                }
+
+                LexicographicCost newCost = distances.get(u.getId()).add(edgePrimary, edgeSecondary);
+
+                // Relaxation phase using the custom Comparable interface
+                if (newCost.compareTo(distances.get(v.getId())) < 0) {
+                    distances.put(v.getId(), newCost);
+                    predecessors.put(v.getId(), u);
+                    pq.add(new Node(v, newCost));
                 }
             }
         }
 
-        return buildRoutePath(origin, destination, previousNodes, cityMap, allRoads);
+        // Reconstruct Path
+        List<RouteStep> route = new ArrayList<>();
+        City curr = destination;
+        while (predecessors.containsKey(curr.getId())) {
+            City prev = predecessors.get(curr.getId());
+            double dist = getRoadDistance(allRoads, prev.getId(), curr.getId());
+            route.add(new RouteStep(prev.getName() + " -> " + curr.getName(), "Penalty: " + weatherPenalties.get(curr.getId()), String.format("%.1f km", dist)));
+            curr = prev;
+        }
+
+        Collections.reverse(route);
+        if (route.isEmpty()) {
+            route.add(new RouteStep("No safe route found", "N/A", "0 km"));        }
+        return route;
     }
 
-    private static List<RouteStep> buildRoutePath(City origin, City destination, Map<Integer, Integer> previousNodes, Map<Integer, City> cityMap, List<Road> allRoads) {
-        List<RouteStep> steps = new ArrayList<>();
-        Integer curr = destination.getId();
+    private static double fetchWeatherPenalty(City c) {
+        // Replace with your actual OpenWeather API call logic
+        // Returning a random penalty for demonstration
+        return Math.random() * 50;
+    }
 
-        if (!previousNodes.containsKey(curr) && origin.getId() != destination.getId()) {
-            steps.add(new RouteStep("No safe route found", "N/A", "N/A"));
-            return steps;
+    private static City getCityById(List<City> cities, int id) {
+        for (City c : cities) if (c.getId() == id) return c;
+        return null;
+    }
+
+    private static double getRoadDistance(List<Road> roads, int fromId, int toId) {
+        for (Road r : roads) if (r.getFromCityId() == fromId && r.getToCityId() == toId) return r.getDistance();
+        return 0;
+    }
+    // ------------------------------------------------------------------------
+    // ADVANCED ALGORITHM: Bellman-Ford for Dynamic/Severe Weight Changes
+    // Time Complexity: O(V * E)
+    // ------------------------------------------------------------------------
+    public static List<RouteStep> calculateRouteBellmanFord(City origin, City destination, List<City> allCities, List<Road> allRoads, Map<Integer, Double> activeStorms) {
+        Map<Integer, Double> distances = new HashMap<>();
+        Map<Integer, Integer> predecessors = new HashMap<>();
+
+        // 1. Initialize distances to infinity
+        for (City c : allCities) {
+            distances.put(c.getId(), Double.MAX_VALUE);
         }
+        distances.put(origin.getId(), 0.0);
 
-        List<Integer> pathIds = new ArrayList<>();
-        while (curr != null) {
-            pathIds.add(curr);
-            curr = previousNodes.get(curr);
-        }
-        Collections.reverse(pathIds);
+        int V = allCities.size();
 
-        // Convert Node IDs into UI RouteSteps
-        for (int i = 0; i < pathIds.size() - 1; i++) {
-            City from = cityMap.get(pathIds.get(i));
-            City to = cityMap.get(pathIds.get(i + 1));
+        // 2. Relax all edges |V| - 1 times
+        for (int i = 1; i < V; i++) {
+            for (Road edge : allRoads) {
+                int u = edge.getFromCityId();
+                int v = edge.getToCityId();
 
-            // Find base distance for UI display
-            int dist = 0;
-            for (Road r : allRoads) {
-                if (r.getFromCityId() == from.getId() && r.getToCityId() == to.getId()) {
-                    dist = r.getDistance();
-                    break;
+                if (distances.get(u) == Double.MAX_VALUE) continue;
+
+                // Combine baseline penalty with dynamic sudden storm penalty
+                double basePenalty = fetchWeatherPenalty(getCityById(allCities, v));
+                double stormPenalty = activeStorms.containsKey(v) ? activeStorms.get(v) : 0.0;
+                double totalWeight = edge.getDistance() + basePenalty + stormPenalty;
+
+                // Bellman-Ford Relaxation
+                if (distances.get(u) + totalWeight < distances.get(v)) {
+                    distances.put(v, distances.get(u) + totalWeight);
+                    predecessors.put(v, u);
                 }
             }
+        }
 
-            // Simulate one last weather check for the UI label
-            String finalWeather = WeatherService.getLiveWeather(to.getLat(), to.getLon());
+        // 3. Path Reconstruction
+        List<RouteStep> route = new ArrayList<>();
+        int curr = destination.getId();
 
-            steps.add(new RouteStep(
-                    from.getName() + " → " + to.getName(),
-                    "Distance: " + dist + " km",
-                    "Weather: " + finalWeather
+        while (predecessors.containsKey(curr)) {
+            int prev = predecessors.get(curr);
+            double dist = getRoadDistance(allRoads, prev, curr);
+
+            String weatherText = activeStorms.containsKey(curr) ? "⚠️ SEVERE STORM (+9999 cost)" : "Clear / Base Penalty";
+
+            route.add(new RouteStep(
+                    getCityById(allCities, prev).getName() + " -> " + getCityById(allCities, curr).getName(),
+                    weatherText,
+                    String.format("%.1f km", dist)
             ));
+            curr = prev;
         }
 
-        return steps;
+        Collections.reverse(route);
+        if (route.isEmpty() || distances.get(destination.getId()) == Double.MAX_VALUE) {
+            route.add(new RouteStep("No safe route found", "N/A", "0 km"));
+        }
+        return route;
     }
 }

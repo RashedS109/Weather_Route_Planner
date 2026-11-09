@@ -1,119 +1,198 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:background="#F8F9FA"
+    android:fillViewport="true"
+    android:background="#F4F6F9"
     tools:context=".MainActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Weather-Adaptive Navigator"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        android:textColor="#212529"
-        android:layout_marginBottom="16dp" />
-
-    <!-- Start City Selector -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Origin City:"
-        android:textStyle="bold"
-        android:textColor="#495057" />
-    <Button
-        android:id="@+id/btnDetectLocation"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="📍 Snap to My Current GPS Location"
-        android:backgroundTint="#28A745" />
+        android:orientation="vertical"
+        android:padding="16dp">
 
-    <Spinner
-        android:id="@+id/spinnerOrigin"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginBottom="12dp"
-        android:background="@android:drawable/btn_dropdown" />
+        <!-- Header -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Weather Route Planner"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:textColor="#1A1A1A"
+            android:textAlignment="center"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="24dp" />
 
-    <!-- Destination City Selector -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Destination City:"
-        android:textStyle="bold"
-        android:textColor="#495057" />
+        <!-- Routing Setup Section (Grouped visually) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#FFFFFF"
+            android:elevation="2dp"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
 
-    <Spinner
-        android:id="@+id/spinnerDestination"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginBottom="16dp"
-        android:background="@android:drawable/btn_dropdown" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Origin City"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#555555" />
 
-    <!-- Free OpenStreetMap View -->
-    <org.osmdroid.views.MapView
-        android:id="@+id/mapView"
-        android:layout_width="match_parent"
-        android:layout_height="220dp"
-        android:layout_marginBottom="16dp" />
-    <!-- Content Provider Trigger -->
-    <Button
-        android:id="@+id/btnShareContact"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="Share Route with Emergency Contact"
-        android:backgroundTint="#6C757D" />
-    <!-- Action Button -->
-    <Button
-        android:id="@+id/btnCalculateRoute"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:text="Find Safest Route"
-        android:textSize="16sp"
-        android:backgroundTint="#0D6EFD"
-        android:textColor="#FFFFFF" />
+            <Spinner
+                android:id="@+id/spinnerOrigin"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="8dp" />
 
-    <!-- Loading Indicator -->
-    <ProgressBar
-        android:id="@+id/progressBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginTop="12dp"
-        android:visibility="gone" />
+            <Button
+                android:id="@+id/btnDetectLocation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📍 Snap to My GPS Location"
+                android:textColor="#FFFFFF"
+                app:backgroundTint="#2E7D32"
+                android:layout_marginBottom="16dp" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Optimized Route Path"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="#212529"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="8dp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Destination City"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="#555555" />
 
-    <!-- List to display route steps -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerViewRoute"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:scrollbars="vertical" />
-    <!-- Live Global Counter -->
-    <TextView
-        android:id="@+id/tvGlobalCounter"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginTop="12dp"
-        android:text="Global Routes Calculated: Loading..."
-        android:textColor="#198754"
-        android:textSize="14sp"
-        android:textStyle="bold" />
+            <Spinner
+                android:id="@+id/spinnerDestination"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
 
-</LinearLayout>
+        <!-- Map & Contact Section -->
+        <org.osmdroid.views.MapView
+            android:id="@+id/mapView"
+            android:layout_width="match_parent"
+            android:layout_height="240dp"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnShareContact"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="✉️ Share with Emergency Contact"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="#546E7A"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Lexicographic Objective Toggles -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Algorithm Objective"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#555555"
+            android:layout_marginBottom="8dp" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="24dp"
+            android:background="#E9ECEF"
+            android:padding="8dp">
+
+            <RadioButton
+                android:id="@+id/radioBalanced"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Balanced"
+                android:checked="true"
+                android:layout_weight="1"/>
+
+            <RadioButton
+                android:id="@+id/radioSafest"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Safest"
+                android:layout_weight="1"/>
+
+            <RadioButton
+                android:id="@+id/radioShortest"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Shortest"
+                android:layout_weight="1"/>
+        </RadioGroup>
+
+        <!-- Primary Action Buttons -->
+        <Button
+            android:id="@+id/btnCalculateRoute"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:text="🔍 Find Safest Route (Dijkstra)"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:backgroundTint="#1976D2"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnSimulateStorm"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="⛈️ Simulate Sudden Storm (Bellman-Ford)"
+            android:textSize="14sp"
+            app:backgroundTint="#D32F2F"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Results Area -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:visibility="gone"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Optimized Route Steps"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#1A1A1A"
+            android:layout_marginBottom="12dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerViewRoute"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:nestedScrollingEnabled="false"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Firebase Global Counter -->
+        <TextView
+            android:id="@+id/tvGlobalCounter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Global Routes Calculated: Loading..."
+            android:textAlignment="center"
+            android:textColor="#388E3C"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="32dp" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>
