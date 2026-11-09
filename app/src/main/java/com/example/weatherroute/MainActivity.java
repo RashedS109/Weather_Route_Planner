@@ -1,5 +1,6 @@
 package com.example.weatherroute;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -8,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.provider.ContactsContract;
@@ -19,6 +21,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
 import com.example.weatherroute.databinding.ActivityMainBinding;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -51,8 +55,9 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseAuth mAuth;
     private DatabaseReference realtimeDb;
 
-    // Android Core Component: Broadcast Receiver
+    // Android Core Components
     private AirplaneModeReceiver airplaneModeReceiver = new AirplaneModeReceiver();
+    private FusedLocationProviderClient fusedLocationClient;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,10 +71,11 @@ public class MainActivity extends AppCompatActivity {
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
+
         // Ask for Notification Permission on Android 13+ for the Foreground Service
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 101);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 101);
             }
         }
 
@@ -79,6 +85,9 @@ public class MainActivity extends AppCompatActivity {
 
         // PASTE YOUR REALTIME DATABASE URL HERE:
         realtimeDb = FirebaseDatabase.getInstance("https://weather-route-planner-75a41-default-rtdb.asia-southeast1.firebasedatabase.app/").getReference("global_stats");
+
+        // Initialize GPS Client
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
         // Setup the Map using the unblocked OpenTopo map server
         map = binding.mapView;
@@ -139,12 +148,21 @@ public class MainActivity extends AppCompatActivity {
             public void onCancelled(DatabaseError error) {}
         });
 
+        // GPS Snapping Logic
+        binding.btnDetectLocation.setOnClickListener(v -> {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                getCurrentLocationAndSnapToCity();
+            } else {
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 102);
+            }
+        });
+
         // Android Core Component: Content Provider Logic (Read Contacts)
         binding.btnShareContact.setOnClickListener(v -> {
-            if (checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+            if (checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
                 accessContactsProvider();
             } else {
-                requestPermissions(new String[]{android.Manifest.permission.READ_CONTACTS}, 100);
+                requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, 100);
             }
         });
 
@@ -271,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
                 null,
                 null,
                 null,
-                ContactsContract.Contacts.DISPLAY_NAME + " ASC" // <-- This forces alphabetical order!
+                ContactsContract.Contacts.DISPLAY_NAME + " ASC"
         );
 
         if (cursor != null && cursor.moveToFirst()) {
@@ -281,5 +299,51 @@ public class MainActivity extends AppCompatActivity {
         } else {
             Toast.makeText(this, "No contacts found on device.", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void getCurrentLocationAndSnapToCity() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+
+        fusedLocationClient.getLastLocation().addOnSuccessListener(this, location -> {
+            if (location != null) {
+                double userLat = location.getLatitude();
+                double userLon = location.getLongitude();
+
+                // Find the nearest city in our SQLite database
+                List<City> cities = db.getAllCities();
+                City nearestCity = null;
+                double minDistance = Double.MAX_VALUE;
+
+                for (City city : cities) {
+                    double dist = calculateHaversineDistance(userLat, userLon, city.getLat(), city.getLon());
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        nearestCity = city;
+                    }
+                }
+
+                if (nearestCity != null) {
+                    // Automatically select the nearest city in the Origin Spinner
+                    ArrayAdapter<City> adapter = (ArrayAdapter<City>) binding.spinnerOrigin.getAdapter();
+                    int spinnerPosition = adapter.getPosition(nearestCity);
+                    binding.spinnerOrigin.setSelection(spinnerPosition);
+
+                    Toast.makeText(this, "Snapped to nearest city: " + nearestCity.getName(), Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                Toast.makeText(this, "Unable to detect GPS. Ensure location is turned on.", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    // Mathematical implementation of the Haversine formula for spherical distance
+    private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return 6371.0 * c; // Earth radius in kilometers
     }
 }

@@ -24,6 +24,13 @@
         android:text="Origin City:"
         android:textStyle="bold"
         android:textColor="#495057" />
+    <Button
+        android:id="@+id/btnDetectLocation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="📍 Snap to My Current GPS Location"
+        android:backgroundTint="#28A745" />
 
     <Spinner
         android:id="@+id/spinnerOrigin"
