@@ -389,6 +389,8 @@ public class MainActivity extends AppCompatActivity {
     private void getCurrentLocationAndSnapToCity() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
 
+        Toast.makeText(this, "Detecting GPS...", Toast.LENGTH_SHORT).show();
+
         fusedLocationClient.getLastLocation().addOnSuccessListener(this, location -> {
             if (location != null) {
                 double userLat = location.getLatitude();
@@ -408,13 +410,18 @@ public class MainActivity extends AppCompatActivity {
 
                 if (nearestCity != null) {
                     ArrayAdapter<City> adapter = (ArrayAdapter<City>) binding.spinnerOrigin.getAdapter();
-                    int spinnerPosition = adapter.getPosition(nearestCity);
-                    binding.spinnerOrigin.setSelection(spinnerPosition);
 
-                    Toast.makeText(this, "Snapped to nearest city: " + nearestCity.getName(), Toast.LENGTH_SHORT).show();
+                    // FIX: Iterate through the adapter and match by exact City ID
+                    for (int i = 0; i < adapter.getCount(); i++) {
+                        if (adapter.getItem(i).getId() == nearestCity.getId()) {
+                            binding.spinnerOrigin.setSelection(i);
+                            Toast.makeText(this, "Snapped to nearest city: " + nearestCity.getName(), Toast.LENGTH_SHORT).show();
+                            break;
+                        }
+                    }
                 }
             } else {
-                Toast.makeText(this, "Unable to detect GPS. Ensure location is turned on.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Location cache empty. Open Google Maps for 5 seconds, then try again.", Toast.LENGTH_LONG).show();
             }
         });
     }
